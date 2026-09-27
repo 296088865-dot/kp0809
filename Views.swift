@@ -84,19 +84,72 @@ struct ClassListView: View {
     var body: some View {
         Group {
             if vm.classes.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 46))
-                        .foregroundColor(.secondary)
-                    Text("还没有载入 dump.cs")
-                        .font(.headline)
-                    Button("选择文件") { vm.showPicker = true }
-                        .buttonStyle(.borderedProminent)
-                    Text("也可以在 Filza 里长按 dump.cs → 打开方式 → 本 App\n或者把文件放进本 App 的 Documents 目录")
+                ScrollView {
+                    VStack(spacing: 14) {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary)
+                            .padding(.top, 24)
+                        Text("还没有载入 dump.cs")
+                            .font(.headline)
+                        Button("选择文件") { vm.showPicker = true }
+                            .buttonStyle(.borderedProminent)
+
+                        if !vm.lastError.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("上次失败原因")
+                                    .font(.caption)
+                                    .foregroundColor(.orange)
+                                Text(vm.lastError)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.red)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(Color(white: 0.14))
+                            .cornerRadius(8)
+                            .padding(.horizontal, 16)
+                        }
+
+                        Divider().padding(.horizontal, 40)
+
+                        Text("App 的 Documents 目录")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(vm.documentsURL.path)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 12)
+
+                        if vm.documentFiles.isEmpty {
+                            Text("（这里是空的）")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(vm.documentFiles, id: \.self) { url in
+                                Button {
+                                    vm.load(url: url, copyIn: false)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "doc.text")
+                                        Text(url.lastPathComponent)
+                                            .font(.system(size: 13))
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 20)
+                                }
+                            }
+                        }
+
+                        Button {
+                            vm.refreshDocuments()
+                        } label: {
+                            Label("重新扫描", systemImage: "arrow.clockwise")
+                        }
                         .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 30)
+                        .padding(.bottom, 30)
+                    }
                 }
             } else {
                 List {

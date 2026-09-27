@@ -14,6 +14,8 @@ final class Store: ObservableObject {
     @Published var status = ""
     @Published var showPicker = false
     @Published var favorites: [String] = []
+    @Published var lastError = ""
+    @Published var documentFiles: [URL] = []
 
     private var index: [String: Int] = [:]
 
@@ -29,10 +31,37 @@ final class Store: ObservableObject {
 
     init() {
         favorites = UserDefaults.standard.stringArray(forKey: favKey) ?? []
+        refreshDocuments()
         let path = currentURL
         if FileManager.default.fileExists(atPath: path.path) {
             load(url: path, copyIn: false)
         }
+    }
+
+    func refreshDocuments() {
+        let fm = FileManager.default
+        let items = (try? fm.contentsOfDirectory(at: documentsURL,
+                                                 includingPropertiesForKeys: nil,
+                                                 options: [.skipsHiddenFiles])) ?? []
+        documentFiles = items
+            .filter { $0.lastPathComponent != "current.cs" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    static func humanSize(_ n: Int) -> String {
+        if n > 1024 * 1024 { return String(format: "%.1f MB", Double(n) / 1048576.0) }
+        if n > 1024 { return String(format: "%.0f KB", Double(n) / 1024.0) }
+        return "\(n) B"
+    }
+
+    /// 宽容解码：UTF-8 不行就 GB18030，再不行按 UTF-8 有损解（和浏览器行为一致）
+    static func decode(_ data: Data) -> String {
+        if let s = String(data: data, encoding: .utf8) { return s }
+        let gbk = CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
+        if let s = String(data: data, encoding: String.Encoding(rawValue: gbk)) { return s }
+        if let s = String(data: data, encoding: .utf16) { return s }
+        return String(decoding: data, as: UTF8.self)
     }
 
     // MARK: - 载入
@@ -40,6 +69,7 @@ final class Store: ObservableObject {
     func load(url: URL, copyIn: Bool = true) {
         loading = true
         status = "读取中…"
+        lastError = ""
         let dest = currentURL
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -47,24 +77,34 @@ final class Store: ObservableObject {
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
             var target = url
+            var copyNote = ""
             if copyIn {
                 try? FileManager.default.removeItem(at: dest)
-                try? FileManager.default.copyItem(at: url, to: dest)
-                if FileManager.default.fileExists(atPath: dest.path) { target = dest }
+                do {
+                    try FileManager.default.copyItem(at: url, to: dest)
+                    target = dest
+                } catch {
+                    copyNote = "（复制失败，直接读原路径）"
+                }
             }
 
-            DispatchQueue.main.async {
-                self?.status = "解析中…"
-            }
-
-            guard let text = try? String(contentsOf: target, encoding: .utf8) else {
+            let data: Data
+            do {
+                data = try Data(contentsOf: target)
+            } catch {
                 DispatchQueue.main.async {
                     self?.loading = false
-                    self?.status = "读取失败（不是文本文件？）"
+                    self?.lastError = "打开文件失败：\(error.localizedDescription)\n对象：\(url.lastPathComponent) \(copyNote)"
+                    self?.status = "读取失败"
                 }
                 return
             }
 
+            DispatchQueue.main.async {
+                self?.status = "解析中…（\(Store.humanSize(data.count))）"
+            }
+
+            let text = Store.decode(data)
             let result = DumpParser.parse(text)
 
             DispatchQueue.main.async {
@@ -81,6 +121,8 @@ final class Store: ObservableObject {
                 self.fileName = target.lastPathComponent
                 self.loading = false
                 self.status = ""
+                self.lastError = ""
+                self.refreshDocuments()
             }
         }
     }
